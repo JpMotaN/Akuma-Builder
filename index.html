@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akuma no Mi Builder - OP RPG 2.0</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+    <header class="header">
+        <h1 class="logo">🍎 Akuma no Mi Builder</h1>
+        <p class="logo-sub">OP RPG 2.0 • Criado por Jotape</p>
+    </header>
+
+    <nav class="nav-abas">
+        <button class="aba-btn active" data-aba="basico">📋 Básico</button>
+        <button class="aba-btn" data-aba="mps">🔮 Manifestações</button>
+        <button class="aba-btn" data-aba="tecnicas">⚔️ Técnicas</button>
+        <button class="aba-btn" data-aba="zoan" style="display: none;">🐾 Zoan</button>
+        <button class="aba-btn" data-aba="resumo">📄 Resumo</button>
+        <button class="aba-btn" data-aba="salvas">💾 Salvas</button>
+    </nav>
+
+    <main class="container">
+        <section id="aba-basico" class="aba-content active"></section>
+        <section id="aba-mps" class="aba-content"></section>
+        <section id="aba-tecnicas" class="aba-content"></section>
+        <section id="aba-zoan" class="aba-content"></section>
+        <section id="aba-resumo" class="aba-content"></section>
+        <section id="aba-salvas" class="aba-content"></section>
+    </main>
+
+    <div id="modal"></div>
+
+    <script src="js/data.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
