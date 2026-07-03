@@ -11,6 +11,7 @@ const App = {
         propriedades: [],
         aspectoInato: '',
         aspectoAlternativo: false,
+        tipoDespertar: '',
         mps: [],
         tecnicas: [],
         tracos: { comuns: [], especificos: [], ancestrais: [] },
@@ -152,11 +153,40 @@ const App = {
                     </div>
                 </div>
             </div>
-            
+
             ${this.renderAspectoInato()}
+            ${this.renderTipoDespertar()}
         `;
-        
+
         this.atualizarAbaZoan();
+    },
+
+    renderTipoDespertar() {
+        // Tipo de Despertar só se aplica a Logia/Paramecia com usuário desperto
+        const tipo = this.akuma.tipo;
+        const isDesperto = this.akuma.usuario?.includes('desperto');
+        if (!isDesperto || (tipo !== 'logia' && tipo !== 'paramecia')) return '';
+
+        const escolhido = TIPOS_DESPERTAR.find(t => t.id === this.akuma.tipoDespertar);
+        return `
+            <div class="form-section">
+                <h3>🌟 Tipo de Despertar</h3>
+                <p class="muted" style="font-size: 0.85rem; margin-bottom: 0.75rem;">Cada fruto tem um tipo de despertar predefinido pelo Narrador.</p>
+                <div class="form-group">
+                    <select onchange="App.akuma.tipoDespertar = this.value; App.renderBasico()">
+                        <option value="">Selecione...</option>
+                        ${TIPOS_DESPERTAR.map(t => `
+                            <option value="${t.id}" ${this.akuma.tipoDespertar === t.id ? 'selected' : ''}>${t.nome}</option>
+                        `).join('')}
+                    </select>
+                </div>
+                ${escolhido ? `
+                    <div class="info-box" style="font-size: 0.9rem; line-height: 1.5;">
+                        <p>${escolhido.desc}</p>
+                    </div>
+                ` : ''}
+            </div>
+        `;
     },
 
     renderAspectoInato() {
@@ -356,6 +386,7 @@ const App = {
                     </div>
                 </div>
                 <p class="item-desc">${mp.desc}</p>
+                ${!isEspecial && mp.requisito ? `<p class="item-req">Ativação: ${MODIFICADORES_PV.find(m => m.id === mp.requisito)?.nome || mp.requisito}</p>` : ''}
                 ${mp.restricao ? `<p class="item-req">Restrição: ${mp.restricao}</p>` : ''}
                 ${mp.efeitos && mp.efeitos.length > 0 ? `
                     <p class="item-efeitos">Efeitos: ${mp.efeitos.map(e => e.nome + (e.detalhe ? ' (' + e.detalhe + ')' : '') + ' [' + (e.custo >= 0 ? '+' : '') + e.custo + ' PV]').join(', ')}</p>
@@ -433,7 +464,7 @@ const App = {
     abrirModalMPCriada() {
         this.editando = {
             tipo: 'mp',
-            dados: { nome: '', desc: '', requisito: 'acao', pvBase: 6 },
+            dados: { nome: '', desc: '', requisito: 'inacao', pvBase: 6 },
             efeitos: []
         };
         this.renderModalCriacao();
@@ -623,7 +654,7 @@ const App = {
             dados: {
                 nome: mp.nome,
                 desc: mp.desc || '',
-                requisito: mp.requisito || 'acao',
+                requisito: mp.requisito || 'inacao',
                 pvBase: 6
             },
             efeitos: mp.efeitos ? [...mp.efeitos] : []
@@ -650,19 +681,24 @@ const App = {
 
     renderFormMP() {
         const dados = this.editando.dados;
-        const pvBase = 6;
-        const modReq = MODIFICADORES_PV.find(m => m.id === dados.requisito)?.ajuste || 0;
+        // Requisito legado 'acao' (removido — não existe na tabela do livro)
+        if (!MODIFICADORES_PV.find(m => m.id === dados.requisito)) dados.requisito = 'inacao';
+        const modReqInfo = MODIFICADORES_PV.find(m => m.id === dados.requisito);
+        const modReq = modReqInfo?.ajuste || 0;
+        // Pág. 208: reduções e o requisito de ativação SOMAM Pontos Virtuais ao pool
+        // (base 6), mas o consumo em efeitos nunca pode ultrapassar 12 PV.
         const custoEfeitos = this.calcularCustoEfeitos();
-        const pvTotal = pvBase + modReq;
-        const pvUsado = custoEfeitos;
-        const pvRestante = Math.min(12, pvTotal) - pvUsado;
-        
+        const reducaoEfeitos = this.calcularReducaoEfeitos();
+        const pvPool = MP_REGRAS.pvBase + modReq + reducaoEfeitos;
+        const pvDisponivel = Math.min(MP_REGRAS.pvTeto, pvPool);
+        const pvRestante = pvDisponivel - custoEfeitos;
+
         return `
             <div class="form-group">
                 <label>Nome da MP</label>
                 <input type="text" value="${dados.nome}" onchange="App.editando.dados.nome = this.value">
             </div>
-            
+
             <div class="form-group">
                 <label>Requisito de Ativação</label>
                 <select onchange="App.editando.dados.requisito = this.value; App.atualizarModalCriacao()">
@@ -673,26 +709,43 @@ const App = {
                     `).join('')}
                 </select>
             </div>
-            
+
             <div class="calc-box">
                 <div class="calc-row">
                     <span class="calc-label">PV Base</span>
-                    <span class="calc-value">6</span>
+                    <span class="calc-value">${MP_REGRAS.pvBase}</span>
                 </div>
                 <div class="calc-row">
-                    <span class="calc-label">Modificador (${dados.requisito})</span>
+                    <span class="calc-label">Requisito (${modReqInfo?.nome || '-'})</span>
                     <span class="calc-value">${modReq >= 0 ? '+' : ''}${modReq}</span>
                 </div>
                 <div class="calc-row">
+                    <span class="calc-label">Reduções (+PV)</span>
+                    <span class="calc-value" style="color: var(--sucesso);">+${reducaoEfeitos}</span>
+                </div>
+                ${pvPool > MP_REGRAS.pvTeto ? `
+                <div class="calc-row">
+                    <span class="calc-label">Teto de consumo (máx ${MP_REGRAS.pvTeto} PV)</span>
+                    <span class="calc-value" style="color: var(--erro);">${pvPool} → ${MP_REGRAS.pvTeto}</span>
+                </div>
+                ` : ''}
+                <div class="calc-row">
                     <span class="calc-label">Efeitos Usados</span>
-                    <span class="calc-value">-${pvUsado}</span>
+                    <span class="calc-value" style="color: var(--erro);">-${custoEfeitos}</span>
                 </div>
                 <div class="calc-row total">
                     <span>PV Disponível</span>
-                    <span>${pvRestante} / ${Math.min(12, pvTotal)}</span>
+                    <span style="color: ${pvRestante < 0 ? 'var(--erro)' : 'var(--sucesso)'}">${pvRestante} / ${pvDisponivel}</span>
                 </div>
             </div>
-            
+
+            <div class="info-box" style="margin: 1rem 0; font-size: 0.85rem;">
+                <strong>Regras de criação de MP (livro, pág. 208):</strong>
+                <ul style="margin: 0.4rem 0 0 1.2rem; line-height: 1.5;">
+                    ${MP_REGRAS.restricoes.map(r => `<li>${r}</li>`).join('')}
+                </ul>
+            </div>
+
             ${this.renderEfeitosSection('mp')}
             
             <div class="form-group">
@@ -718,9 +771,14 @@ const App = {
 
         const custoBase = isCombate ? parseInt(dados.grau) * 2 : 0;
         const custoEfeitos = this.calcularCustoEfeitos();
-        const reducaoEfeitos = this.calcularReducaoEfeitos();
+        const reducaoBruta = this.calcularReducaoEfeitos();
+        // Livro: máximo de redução em Técnica de Combate = grau; Auxiliares: máx 6 PP.
+        const reducaoMax = isCombate ? parseInt(dados.grau) : 6;
+        const reducaoEfeitos = Math.min(reducaoBruta, reducaoMax);
         const ppTotal = Math.max(1, custoBase + custoEfeitos - reducaoEfeitos);
-        const ppMax = isCombate ? grauInfo.ppMax : 10;
+        // Auxiliares: máx 10 PP (15 PP quando o usuário é desperto)
+        const isDesperto = this.akuma.usuario?.includes('desperto');
+        const ppMax = isCombate ? grauInfo.ppMax : (isDesperto ? 15 : 10);
 
         // Tipos de dano disponíveis
         const tiposDano = ['Contundente', 'Cortante', 'Perfurante', 'Fogo', 'Frio', 'Elétrico', 'Trovejante', 'Ácido', 'Veneno', 'Necrótico', 'Radiante', 'Psíquico', 'Verdadeiro'];
@@ -810,7 +868,7 @@ const App = {
                     <span class="calc-value" style="color: var(--erro);">+${custoEfeitos} PP</span>
                 </div>
                 <div class="calc-row">
-                    <span class="calc-label">Reduções (-)</span>
+                    <span class="calc-label">Reduções (-) ${reducaoBruta > reducaoMax ? `<span style="color: var(--erro); font-size: 0.8rem;">(${reducaoBruta} PP excede o máximo de ${reducaoMax} — limitado)</span>` : `<span class="muted" style="font-size: 0.8rem;">(máx ${reducaoMax} PP)</span>`}</span>
                     <span class="calc-value" style="color: var(--sucesso);">-${reducaoEfeitos} PP</span>
                 </div>
                 <div class="calc-row total">
@@ -850,6 +908,8 @@ const App = {
     renderEfeitosSection(tipo) {
         const efeitos = this.editando.efeitos;
         const grau = parseInt(this.editando.dados?.grau) || 1;
+        const isMP = tipo === 'mp';
+        const filtrarMP = lista => isMP ? lista.filter(e => !MP_REGRAS.efeitosProibidos.includes(e.id)) : lista;
 
         const renderEfeitoOpcao = (e, cat, subcat) => {
             let custoDisplay;
@@ -892,7 +952,7 @@ const App = {
                             <span class="cat-arrow" id="arrow-controle">▼</span>
                         </div>
                         <div class="cat-body" id="cat-controle">
-                            ${EFEITOS_AUMENTO.controle.map(e => renderEfeitoOpcao(e, 'aumento', 'controle')).join('')}
+                            ${filtrarMP(EFEITOS_AUMENTO.controle).map(e => renderEfeitoOpcao(e, 'aumento', 'controle')).join('')}
                         </div>
                     </div>
 
@@ -902,7 +962,7 @@ const App = {
                             <span class="cat-arrow" id="arrow-ofensivo">▼</span>
                         </div>
                         <div class="cat-body" id="cat-ofensivo">
-                            ${EFEITOS_AUMENTO.ofensivo.map(e => renderEfeitoOpcao(e, 'aumento', 'ofensivo')).join('')}
+                            ${filtrarMP(EFEITOS_AUMENTO.ofensivo).map(e => renderEfeitoOpcao(e, 'aumento', 'ofensivo')).join('')}
                         </div>
                     </div>
 
@@ -912,7 +972,7 @@ const App = {
                             <span class="cat-arrow" id="arrow-suporte">▼</span>
                         </div>
                         <div class="cat-body" id="cat-suporte">
-                            ${EFEITOS_AUMENTO.suporte.map(e => renderEfeitoOpcao(e, 'aumento', 'suporte')).join('')}
+                            ${filtrarMP(EFEITOS_AUMENTO.suporte).map(e => renderEfeitoOpcao(e, 'aumento', 'suporte')).join('')}
                         </div>
                     </div>
 
@@ -922,7 +982,7 @@ const App = {
                             <span class="cat-arrow" id="arrow-reducao">▼</span>
                         </div>
                         <div class="cat-body" id="cat-reducao">
-                            ${EFEITOS_REDUCAO.geral.map(e => renderEfeitoOpcao(e, 'reducao', 'geral')).join('')}
+                            ${filtrarMP(EFEITOS_REDUCAO.geral).map(e => renderEfeitoOpcao(e, 'reducao', 'geral')).join('')}
                         </div>
                     </div>
                 </div>
@@ -962,8 +1022,9 @@ const App = {
     },
 
     // Calcula o custo dinâmico de um efeito baseado no custoCalc
+    // (MPs seguem as regras de Técnicas de 2º grau — pág. 208 do livro)
     calcularCustoDinamico(efeito, dados) {
-        const grau = parseInt(this.editando.dados?.grau) || 1;
+        const grau = parseInt(this.editando.dados?.grau) || (this.editando.tipo === 'mp' ? 2 : 1);
         const isAuxiliar = this.editando.tipoTec === 'auxiliar';
 
         if (!efeito.custoCalc) return efeito.custo || 0;
@@ -971,6 +1032,8 @@ const App = {
         switch (efeito.custoCalc) {
             case 'metade-grau-cima':
                 if (isAuxiliar && efeito.custoAuxiliar) return efeito.custoAuxiliar;
+                // Condição/Efeito em Área é grátis em Técnicas de 1º grau (livro, Cap. 6)
+                if (efeito.id === 'condicao-area' && grau === 1) return 0;
                 return Math.ceil(grau / 2);
             case 'igual-grau':
                 return grau;
@@ -983,8 +1046,9 @@ const App = {
     },
 
     // Calcula a redução dinâmica de um efeito
+    // (MPs seguem as regras de Técnicas de 2º grau — pág. 208 do livro)
     calcularReducaoDinamica(efeito) {
-        const grau = parseInt(this.editando.dados?.grau) || 1;
+        const grau = parseInt(this.editando.dados?.grau) || (this.editando.tipo === 'mp' ? 2 : 1);
         const isAuxiliar = this.editando.tipoTec === 'auxiliar';
 
         if (efeito.reducaoCalc) {
@@ -1015,6 +1079,15 @@ const App = {
         }
 
         if (!efeito) return;
+
+        // Técnica Rápida só pode ser usada em Técnicas de até 4º grau (livro)
+        if (efeito.id === 'tecnica-rapida') {
+            const grauAtual = parseInt(this.editando.dados?.grau) || 1;
+            if (grauAtual > 4) {
+                alert('Técnica Rápida só pode ser aplicada em Técnicas de até 4º grau.');
+                return;
+            }
+        }
 
         // Se tem opções, abrir sub-seleção
         if (efeito.opcoes && efeito.opcoes !== 'condicoes' && efeito.opcoes !== 'condicoes-reducao') {
@@ -1284,7 +1357,10 @@ const App = {
         }
 
         const custoBase = isCombate ? parseInt(dados.grau) * 2 : 0;
-        const ppTotal = Math.max(1, custoBase + this.calcularCustoEfeitos() - this.calcularReducaoEfeitos());
+        // Aplica o mesmo cap de redução do livro (combate = grau; auxiliar = 6 PP)
+        const reducaoMax = isCombate ? (parseInt(dados.grau) || 1) : 6;
+        const reducaoEfetiva = Math.min(this.calcularReducaoEfeitos(), reducaoMax);
+        const ppTotal = Math.max(1, custoBase + this.calcularCustoEfeitos() - reducaoEfetiva);
 
         // Dano: usar customizado se preenchido, senão usar base do grau (combate) ou Nenhum (auxiliar)
         let dano = 'Nenhum';
@@ -1346,11 +1422,19 @@ const App = {
         const isCarnivoro = classificacao === 'carnivoro';
         const isAncestral = subtipo === 'ancestral';
         const isMitica = subtipo === 'mitica';
-        
+        const isMiticaDesperto = isMitica && this.akuma.usuario === 'mitica-desperto';
+
         // Calcular limites de traços
         const maxComuns = isMitica ? 2 : 3;
-        const maxEspecificos = isMitica ? 2 : (isCarnivoro ? 3 : 5);
-        const maxAncestrais = isAncestral ? 4 : (isMitica ? 1 : 0); // Ancestral: 1 obrigatório + até 3 trocas
+        let maxEspecificos = isMitica ? 2 : (isCarnivoro ? 3 : 5);
+        let maxAncestrais = isAncestral ? 4 : (isMitica ? 1 : 0); // Ancestral: 1 obrigatório + até 3 trocas
+        // Mítica Desperto: +1 Traço Específico OU Ancestral extra (um só, em qualquer das listas)
+        if (isMiticaDesperto) {
+            const extraNoAncestral = this.akuma.tracos.ancestrais.length > 1;
+            const extraNoEspecifico = this.akuma.tracos.especificos.length > 2;
+            maxEspecificos = 2 + (extraNoAncestral ? 0 : 1);
+            maxAncestrais = 1 + (extraNoEspecifico ? 0 : 1);
+        }
         
         // Obter regras do tipo de usuário
         let regrasUsuario;
@@ -1381,7 +1465,10 @@ const App = {
                         ` : ''}
                         ${isMitica ? `
                             <tr><td>Traços Ancestrais:</td><td><strong>1</strong></td></tr>
-                            <tr><td>MPs:</td><td><strong>${this.akuma.usuario === 'mitica-desperto' ? 2 : 1}</strong></td></tr>
+                            ${isMiticaDesperto ? `<tr><td>Traço Extra:</td><td><strong>1</strong> Específico OU Ancestral adicional</td></tr>` : ''}
+                            <tr><td>MPs:</td><td><strong>${isMiticaDesperto ? 2 : 1}</strong> (2ª MP apenas durante o Estágio Desperto)</td></tr>
+                            <tr><td>Técnicas/Points:</td><td>A cada nível de grau (1º/3º/6º/9º/12º${isMiticaDesperto ? '/16º/20º' : ''}), escolha <strong>Técnica OU Point</strong></td></tr>
+                            <tr><td>Téc. Auxiliares:</td><td>No <strong>6º e 12º</strong> nível</td></tr>
                         ` : ''}
                     </table>
                 </div>
@@ -1449,35 +1536,46 @@ const App = {
                 ` : ''}
             </div>
             
-            ${subtipo !== 'mitica' ? this.renderPointsZoan() : ''}
+            ${this.renderPointsZoan(isMitica)}
 
-            ${isDesperto && !isMitica ? `
-            <div class="form-section">
-                <h3>🌟 Despertar</h3>
-                <div class="info-box" style="padding: 1rem; background: linear-gradient(135deg, rgba(212,175,55,0.15), rgba(50,50,0,0.3)); border: 1px solid var(--secundaria); border-radius: 8px;">
-                    <p style="margin-bottom: 0.5rem;"><strong>Despertar da Mente e do Corpo:</strong></p>
-                    <p style="font-size: 0.9rem; line-height: 1.5;">${regrasUsuario.despertarDesc || 'O Narrador deve considerar que o personagem assumiu a essência da Akuma no Mi consumida, alinhando sua mente com a sua natureza mística. O Narrador pode estipular uma ação específica para cada fruto.'}</p>
-                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--borda);">
-                        <p class="muted" style="font-size: 0.85rem;"><strong>Requisito para Despertar:</strong> O atributo ligado à Propriedade da fruta deve atingir o valor mínimo da Categoria (S=20, A=19, B=18, C=17).</p>
-                    </div>
-                </div>
-            </div>
-            ` : ''}
+            ${isDesperto ? this.renderEstagioDesperto(isMitica ? 'mitica' : 'zoan') : ''}
         `;
     },
 
-    renderPointsZoan() {
+    renderEstagioDesperto(tipo) {
+        const info = ESTAGIO_DESPERTO[tipo];
+        if (!info) return '';
+        return `
+            <div class="form-section">
+                <h3>🌟 ${info.titulo}</h3>
+                <div class="info-box" style="padding: 1rem; background: linear-gradient(135deg, rgba(212,175,55,0.15), rgba(50,50,0,0.3)); border: 1px solid var(--secundaria); border-radius: 8px;">
+                    <p style="font-size: 0.85rem; margin-bottom: 0.75rem;"><strong>Requisitos:</strong> ${info.requisito}</p>
+                    <ul style="margin: 0 0 0 1.2rem; font-size: 0.9rem; line-height: 1.6;">
+                        ${info.caracteristicas.map(c => `<li>${c}</li>`).join('')}
+                    </ul>
+                </div>
+            </div>
+        `;
+    },
+
+    renderPointsZoan(isMitica = false) {
         return `
             <div class="form-section">
                 <div class="section-header">
                     <h3>📍 Points</h3>
                     <div class="btns">
-                        <button class="btn btn-primary btn-small" onclick="App.abrirModalPoint()">+ Adicionar Point</button>
+                        <button class="btn btn-primary btn-small" onclick="App.abrirModalPoint()">+ Point Modelo</button>
+                        <button class="btn btn-secondary btn-small" onclick="App.abrirModalPointCustom()">+ Criar Point</button>
                     </div>
                 </div>
-                
+
                 <div class="info-box" style="margin-bottom: 1rem; padding: 0.75rem; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 0.85rem;">
-                    <strong>Progressão de Points:</strong> 1º nível (1º Point), 3º nível (2º Point), 6º nível (3º Point), 9º nível (4º Point), 12º nível (5º Point)
+                    ${isMitica ? `
+                        <strong>Zoan Mítica:</strong> em cada nível de grau (1º/3º/6º/9º/12º — e 16º/20º se desperta), você pode escolher <strong>não receber a Técnica</strong> daquele nível para criar ou receber qualquer Point das Zoan Comuns/Ancestrais, dentro das mesmas regras.
+                    ` : `
+                        <strong>Progressão de Points:</strong> 1º nível (1º Point), 3º nível (2º Point), 6º nível (3º Point), 9º nível (4º Point), 12º nível (5º Point)
+                    `}
+                    <br><strong>Criação de Points:</strong> Traço Realçado usa pontos virtuais (regras de MP) com máximo por Point (—/4/6/8/10 PP); Técnica com PP máximo por Point (2/4/6/8/10 PP). Ao mesclar traço + técnica no mesmo Point, os pontos do traço são descontados do máximo da técnica.
                 </div>
                 
                 <div class="lista-items">
@@ -1568,6 +1666,180 @@ const App = {
         this.renderZoan();
     },
 
+    // ==================== CRIAÇÃO DE POINT CUSTOMIZADO ====================
+    abrirModalPointCustom() {
+        this.pointCustom = {
+            nome: '',
+            pointNum: 2,
+            desc: '',
+            usarTraco: false,
+            tracoNome: '',
+            tracoDesc: '',
+            tracoPV: 0,
+            usarTecnica: true,
+            tecNome: '',
+            tecGrau: 1,
+            tecPP: 2,
+            tecDano: '',
+            tecDuracao: 'Instantâneo',
+            tecAlcance: 'Toque',
+            tecDesc: ''
+        };
+        this.renderModalPointCustom();
+    },
+
+    renderModalPointCustom() {
+        const pc = this.pointCustom;
+        const info = CRIACAO_POINTS.find(p => p.point === parseInt(pc.pointNum)) || CRIACAO_POINTS[1];
+        const podeTraco = info.maxPPTraco > 0;
+        const pvTraco = pc.usarTraco && podeTraco ? (parseInt(pc.tracoPV) || 0) : 0;
+        // Mesclando traço + técnica: PV do traço descontam do máximo de PP da técnica
+        const maxPPTecnica = Math.max(0, info.maxPPTecnica - pvTraco);
+        const erros = [];
+        if (pc.usarTraco && !podeTraco) erros.push('O 1º Point não permite Traço Realçado (apenas Técnica de até 2 PP).');
+        if (pc.usarTraco && podeTraco && pvTraco > info.maxPPTraco) erros.push(`Traço Realçado excede o máximo de ${info.maxPPTraco} pontos virtuais do ${info.nome}.`);
+        if (pc.usarTecnica && (parseInt(pc.tecPP) || 0) > maxPPTecnica) erros.push(`A Técnica excede o máximo de ${maxPPTecnica} PP ${pvTraco > 0 ? `(${info.maxPPTecnica} do ${info.nome} - ${pvTraco} PV do traço)` : `do ${info.nome}`}.`);
+        if (!pc.usarTraco && !pc.usarTecnica) erros.push('O Point precisa de um Traço Realçado e/ou uma Técnica.');
+
+        this.abrirModal('Criar Point', `
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Nome do Point</label>
+                    <input type="text" value="${pc.nome}" onchange="App.pointCustom.nome = this.value" placeholder="Ex: Fang Point">
+                </div>
+                <div class="form-group">
+                    <label>Point (nível recebido)</label>
+                    <select onchange="App.pointCustom.pointNum = this.value; App.renderModalPointCustom()">
+                        ${CRIACAO_POINTS.map(p => `
+                            <option value="${p.point}" ${parseInt(pc.pointNum) === p.point ? 'selected' : ''}>
+                                ${p.nome} (${p.nivel}º nível) — Traço máx ${p.maxPPTraco || '—'} PV | Técnica máx ${p.maxPPTecnica} PP
+                            </option>
+                        `).join('')}
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Descrição do Point</label>
+                <textarea onchange="App.pointCustom.desc = this.value" placeholder="Como é a transformação...">${pc.desc}</textarea>
+            </div>
+
+            <div class="form-group" style="padding: 0.75rem; background: rgba(0,0,0,0.15); border-radius: 8px;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    <input type="checkbox" ${pc.usarTraco ? 'checked' : ''} ${!podeTraco ? 'disabled' : ''}
+                           onchange="App.pointCustom.usarTraco = this.checked; App.renderModalPointCustom()">
+                    <strong>Traço Realçado</strong> ${podeTraco ? `(máx ${info.maxPPTraco} pontos virtuais — segue as regras de criação de MP)` : '(indisponível no 1º Point)'}
+                </label>
+                ${pc.usarTraco && podeTraco ? `
+                    <div class="form-row" style="margin-top: 0.5rem;">
+                        <div class="form-group">
+                            <label>Nome do Traço</label>
+                            <input type="text" value="${pc.tracoNome}" onchange="App.pointCustom.tracoNome = this.value">
+                        </div>
+                        <div class="form-group">
+                            <label>Pontos virtuais usados (máx ${info.maxPPTraco})</label>
+                            <input type="number" min="1" max="${info.maxPPTraco}" value="${pc.tracoPV || 1}"
+                                   onchange="App.pointCustom.tracoPV = this.value; App.renderModalPointCustom()">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Descrição do Traço</label>
+                        <textarea onchange="App.pointCustom.tracoDesc = this.value">${pc.tracoDesc}</textarea>
+                    </div>
+                ` : ''}
+            </div>
+
+            <div class="form-group" style="padding: 0.75rem; background: rgba(0,0,0,0.15); border-radius: 8px;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    <input type="checkbox" ${pc.usarTecnica ? 'checked' : ''}
+                           onchange="App.pointCustom.usarTecnica = this.checked; App.renderModalPointCustom()">
+                    <strong>Técnica</strong> (máx ${maxPPTecnica} PP${pvTraco > 0 ? ` — ${info.maxPPTecnica} do ${info.nome} menos ${pvTraco} PV do traço` : ''})
+                </label>
+                ${pc.usarTecnica ? `
+                    <div class="form-row" style="margin-top: 0.5rem;">
+                        <div class="form-group">
+                            <label>Nome da Técnica</label>
+                            <input type="text" value="${pc.tecNome}" onchange="App.pointCustom.tecNome = this.value">
+                        </div>
+                        <div class="form-group">
+                            <label>Grau</label>
+                            <select onchange="App.pointCustom.tecGrau = this.value">
+                                ${SISTEMA.graus.filter(g => g.grau <= parseInt(pc.pointNum)).map(g => `
+                                    <option value="${g.grau}" ${parseInt(pc.tecGrau) === g.grau ? 'selected' : ''}>${g.grau}º Grau</option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>PP (máx ${maxPPTecnica})</label>
+                            <input type="number" min="1" max="${maxPPTecnica}" value="${pc.tecPP}"
+                                   onchange="App.pointCustom.tecPP = this.value; App.renderModalPointCustom()">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Dano (vazio = Nenhum)</label>
+                            <input type="text" value="${pc.tecDano}" onchange="App.pointCustom.tecDano = this.value" placeholder="Ex: 4d10 Cortante">
+                        </div>
+                        <div class="form-group">
+                            <label>Duração</label>
+                            <input type="text" value="${pc.tecDuracao}" onchange="App.pointCustom.tecDuracao = this.value">
+                        </div>
+                        <div class="form-group">
+                            <label>Alcance</label>
+                            <input type="text" value="${pc.tecAlcance}" onchange="App.pointCustom.tecAlcance = this.value">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Descrição da Técnica</label>
+                        <textarea onchange="App.pointCustom.tecDesc = this.value">${pc.tecDesc}</textarea>
+                    </div>
+                ` : ''}
+            </div>
+
+            ${erros.length > 0 ? `
+                <div class="info-box" style="border: 1px solid var(--erro); background: rgba(139,0,0,0.15); padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem;">
+                    ${erros.map(e => `<p style="color: var(--erro); font-size: 0.85rem;">⚠️ ${e}</p>`).join('')}
+                </div>
+            ` : ''}
+
+            <div class="btns btns-center">
+                <button class="btn btn-secondary" onclick="App.fecharModal()">Cancelar</button>
+                <button class="btn btn-primary" onclick="App.salvarPointCustom()" ${erros.length > 0 ? 'disabled' : ''}>Salvar Point</button>
+            </div>
+        `, true);
+    },
+
+    salvarPointCustom() {
+        const pc = this.pointCustom;
+        const info = CRIACAO_POINTS.find(p => p.point === parseInt(pc.pointNum)) || CRIACAO_POINTS[1];
+        const point = {
+            id: 'point-' + Date.now(),
+            nome: pc.nome || 'Point Sem Nome',
+            pointNum: parseInt(pc.pointNum),
+            desc: pc.desc ? `${info.nome} — ${pc.desc}` : info.nome,
+            tracoRealcado: pc.usarTraco && info.maxPPTraco > 0 ? {
+                nome: pc.tracoNome || 'Traço Realçado',
+                desc: `${pc.tracoDesc || ''} (${pc.tracoPV || 1} pontos virtuais)`
+            } : null,
+            tecnica: pc.usarTecnica ? {
+                nome: pc.tecNome || 'Técnica Sem Nome',
+                grau: parseInt(pc.tecGrau) || 1,
+                pp: parseInt(pc.tecPP) || 1,
+                desc: pc.tecDesc || '',
+                dano: pc.tecDano || 'Nenhum',
+                duracao: pc.tecDuracao || 'Instantâneo',
+                alcance: pc.tecAlcance || 'Toque',
+                requisito: 'Akuma no Mi (Zoan), Ação Poderosa',
+                ataqueCombinado: false,
+                nivelMinimo: info.nivel
+            } : null,
+            predefinido: false
+        };
+        this.akuma.points.push(point);
+        this.fecharModal();
+        this.renderZoan();
+    },
+
     // ==================== ABA RESUMO ====================
     renderResumo() {
         const container = document.getElementById('aba-resumo');
@@ -1601,7 +1873,9 @@ const App = {
                 <div class="btns btns-center">
                     <button class="btn btn-secondary" onclick="App.salvarAkuma()">💾 Salvar</button>
                     <button class="btn btn-secondary" onclick="App.exportarJSON()">📋 Exportar JSON</button>
-                    <button class="btn btn-primary" onclick="App.baixarPDF()">📥 Baixar PDF</button>
+                    <button class="btn btn-secondary" onclick="App.importarJSON()">📂 Importar JSON</button>
+                    <button class="btn btn-primary btn-pdf" onclick="App.baixarPDF()">📥 Baixar PDF</button>
+                    <button class="btn btn-secondary" onclick="App.imprimirFicha()">🖨️ Imprimir / Salvar como PDF</button>
                 </div>
             </div>
         `;
@@ -1693,13 +1967,32 @@ const App = {
         if (a.mps.length > 0) {
             html += `<h2 style="color: ${cor1}; border-bottom: 2px solid ${cor2}; margin-top: 1rem; font-size: 1.1rem;">MANIFESTAÇÕES DE PODER</h2>`;
             a.mps.forEach(mp => {
-                html += `<p><strong>${mp.nome}:</strong> ${mp.desc}</p>`;
+                const ativacao = !mp.especial && mp.requisito ? MODIFICADORES_PV.find(m => m.id === mp.requisito)?.nome : '';
+                html += `<p><strong>${mp.nome}${ativacao ? ' (' + ativacao + ')' : ''}:</strong> ${mp.desc}</p>`;
                 if (this.exportConfig.mostrarEfeitos && mp.efeitos?.length > 0) {
                     html += `<p style="font-size: 0.85rem; color: #666; margin-left: 1rem;">Efeitos: ${mp.efeitos.map(e => e.nome + (e.detalhe ? ' (' + e.detalhe + ')' : '')).join(', ')}</p>`;
                 }
             });
         }
         
+        // Despertar
+        if (a.usuario?.includes('desperto')) {
+            let infoDesperto;
+            if (a.tipo === 'zoan') {
+                infoDesperto = a.subtipo === 'mitica' ? ESTAGIO_DESPERTO.mitica : ESTAGIO_DESPERTO.zoan;
+            } else {
+                infoDesperto = ESTAGIO_DESPERTO.logiaParamecia;
+            }
+            html += `<h2 style="color: ${cor1}; border-bottom: 2px solid ${cor2}; margin-top: 1rem; font-size: 1.1rem;">DESPERTAR</h2>`;
+            html += `<p style="font-size: 0.85rem; color: #555;"><strong>Requisitos:</strong> ${infoDesperto.requisito}</p>`;
+            html += `<p style="font-weight: bold; margin-top: 0.5rem;">${infoDesperto.titulo}:</p>`;
+            html += `<ul style="margin: 0.25rem 0 0.5rem 1.2rem; font-size: 0.9rem;">${infoDesperto.caracteristicas.map(c => `<li>${c}</li>`).join('')}</ul>`;
+            const tipoDesp = TIPOS_DESPERTAR.find(t => t.id === a.tipoDespertar);
+            if (tipoDesp && (a.tipo === 'logia' || a.tipo === 'paramecia')) {
+                html += `<p style="font-size: 0.9rem;"><strong>${tipoDesp.nome}:</strong> ${tipoDesp.desc}</p>`;
+            }
+        }
+
         // Traços Zoan
         if (a.tipo === 'zoan') {
             html += `<h2 style="color: ${cor1}; border-bottom: 2px solid ${cor2}; margin-top: 1rem; font-size: 1.1rem;">TRAÇOS</h2>`;
@@ -1751,7 +2044,7 @@ const App = {
             if (a.points.length > 0) {
                 html += `<h2 style="color: ${cor1}; border-bottom: 2px solid ${cor2}; margin-top: 1rem; font-size: 1.1rem;">POINTS</h2>`;
                 a.points.forEach(p => {
-                    html += `<div style="margin-bottom: 1rem; padding: 0.5rem; background: #f5f5f5; border-left: 3px solid ${cor1};">`;
+                    html += `<div class="no-quebra" style="margin-bottom: 1rem; padding: 0.5rem; background: #f5f5f5; border-left: 3px solid ${cor1}; break-inside: avoid; page-break-inside: avoid;">`;
                     html += `<p style="font-weight: bold; margin-bottom: 0.3rem;">${p.nome}</p>`;
                     if (p.descCustom) {
                         html += `<p style="font-size: 0.9rem; font-style: italic; color: #555;">${p.descCustom}</p>`;
@@ -1790,7 +2083,7 @@ const App = {
 
     gerarHTMLTecnica(tec, cor, isAuxiliar = false) {
         return `
-            <div style="background: #f8f8f8; border: 1px solid #333; margin: 0.75rem 0; font-size: 0.9rem;">
+            <div class="no-quebra" style="background: #f8f8f8; border: 1px solid #333; margin: 0.75rem 0; font-size: 0.9rem; break-inside: avoid; page-break-inside: avoid;">
                 <!-- Header com grau e nome -->
                 <div style="display: flex; background: #222;">
                     <div style="background: ${cor}; color: #fff; padding: 0.4rem 0.5rem; min-width: 40px; text-align: center; display: flex; flex-direction: column; justify-content: center; font-weight: bold; font-size: 0.8rem;">
@@ -1897,7 +2190,7 @@ const App = {
     novaAkuma() {
         this.akuma = {
             nome: '', tipo: '', subtipo: '', classificacao: '', categoria: '', usuario: '',
-            propriedades: [], aspectoInato: '', aspectoAlternativo: false,
+            propriedades: [], aspectoInato: '', aspectoAlternativo: false, tipoDespertar: '',
             mps: [], tecnicas: [], tracos: { comuns: [], especificos: [], ancestrais: [] }, points: []
         };
         this.renderBasico();
@@ -1953,30 +2246,131 @@ const App = {
         a.click();
     },
 
-    baixarPDF() {
-        const conteudo = document.getElementById('pdf-content');
-        const opt = {
-            margin: 10,
-            filename: (this.akuma.nome || 'akuma') + '.pdf',
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2 },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    importarJSON() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json,application/json';
+        input.onchange = e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => {
+                try {
+                    const dados = JSON.parse(ev.target.result);
+                    this.akuma = Object.assign({
+                        nome: '', tipo: '', subtipo: '', classificacao: '', categoria: '', usuario: '',
+                        propriedades: [], aspectoInato: '', aspectoAlternativo: false, tipoDespertar: '',
+                        mps: [], tecnicas: [], tracos: { comuns: [], especificos: [], ancestrais: [] }, points: []
+                    }, dados);
+                    if (!this.akuma.tracos) this.akuma.tracos = { comuns: [], especificos: [], ancestrais: [] };
+                    this.renderBasico();
+                    this.renderMPs();
+                    this.renderTecnicas();
+                    this.renderZoan();
+                    this.renderResumo();
+                    alert('Akuma importada com sucesso!');
+                } catch (err) {
+                    alert('Arquivo JSON inválido: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
         };
-        
-        if (typeof html2pdf !== 'undefined') {
-            html2pdf().set(opt).from(conteudo).save();
-        } else {
-            // Fallback: abrir em nova janela para impressão
-            const win = window.open('', '_blank');
-            win.document.write(`
-                <html><head><title>${this.akuma.nome || 'Akuma'}</title>
-                <link href="https://fonts.googleapis.com/css2?family=Pirata+One&family=Cinzel:wght@400;600;700&family=Crimson+Pro:wght@400;500;600&display=swap" rel="stylesheet">
-                <style>body { font-family: 'Crimson Pro', serif; padding: 2rem; }</style>
-                </head><body>${conteudo.innerHTML}</body></html>
-            `);
-            win.document.close();
-            win.print();
+        input.click();
+    },
+
+    baixarPDF() {
+        const original = document.getElementById('pdf-content');
+        const btn = document.querySelector('.btn-pdf');
+        if (btn) { btn.disabled = true; btn.textContent = 'Gerando PDF...'; }
+
+        const restaurarBtn = () => {
+            if (btn) { btn.disabled = false; btn.textContent = '📥 Baixar PDF'; }
+        };
+
+        if (typeof html2pdf === 'undefined') {
+            restaurarBtn();
+            alert('Biblioteca de PDF não carregou (sem internet?). Abrindo a janela de impressão — use "Salvar como PDF".');
+            this.imprimirFicha();
+            return;
         }
+
+        // O html2canvas corta o conteúdo quando o elemento está centralizado ou a
+        // página tem scroll. Renderiza a partir de um clone posicionado em (0,0),
+        // no topo do documento, com largura fixa — captura sempre limpa.
+        const LARGURA = 750; // ≈ largura útil de uma A4 com margens de 10mm
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = `position: absolute; left: 0; top: 0; width: ${LARGURA}px; background: #fff; z-index: -1000; pointer-events: none;`;
+        const clone = original.cloneNode(true);
+        clone.style.width = '100%';
+        clone.style.maxWidth = 'none';
+        clone.style.margin = '0';
+        // Folga à direita: o html2canvas desenha o texto um pouco mais largo que o
+        // layout do navegador; sem essa folga a última palavra de cada linha é clipada
+        clone.style.padding = '0 34px 0 0';
+        clone.style.boxSizing = 'border-box';
+        wrapper.appendChild(clone);
+        document.body.prepend(wrapper);
+        const scrollAntes = { x: window.scrollX, y: window.scrollY };
+        window.scrollTo(0, 0);
+
+        const opt = {
+            margin: [10, 10, 12, 10],
+            filename: (this.akuma.nome || 'akuma') + '.pdf',
+            image: { type: 'jpeg', quality: 0.95 },
+            html2canvas: {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                scrollX: 0,
+                scrollY: 0,
+                windowWidth: LARGURA
+            },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            // Evita cortar técnicas/blocos no meio entre páginas
+            pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        };
+
+        const limpar = () => {
+            wrapper.remove();
+            window.scrollTo(scrollAntes.x, scrollAntes.y);
+            restaurarBtn();
+        };
+
+        html2pdf().set(opt).from(clone).save()
+            .then(limpar)
+            .catch(err => {
+                console.error('Erro ao gerar PDF:', err);
+                limpar();
+                alert('Falha ao gerar o PDF diretamente. Abrindo a janela de impressão — use "Salvar como PDF".');
+                this.imprimirFicha();
+            });
+    },
+
+    // Alternativa vetorial: imprime a ficha (Ctrl+P → Salvar como PDF).
+    // Gera texto selecionável e nunca corta blocos no meio.
+    imprimirFicha() {
+        const conteudo = document.getElementById('pdf-content');
+        const win = window.open('', '_blank');
+        if (!win) {
+            alert('O navegador bloqueou a janela de impressão. Permita pop-ups para este site.');
+            return;
+        }
+        win.document.write(`
+            <html><head><title>${this.akuma.nome || 'Akuma'}</title>
+            <meta charset="UTF-8">
+            <link href="https://fonts.googleapis.com/css2?family=Pirata+One&family=Cinzel:wght@400;600;700&family=Crimson+Pro:wght@400;500;600&display=swap" rel="stylesheet">
+            <style>
+                body { font-family: 'Crimson Pro', serif; padding: 1.5rem; margin: 0; }
+                .no-quebra { break-inside: avoid; page-break-inside: avoid; }
+                table { break-inside: auto; }
+                tr { break-inside: avoid; page-break-inside: avoid; }
+                @page { size: A4 portrait; margin: 12mm; }
+            </style>
+            </head><body>${conteudo.innerHTML}</body></html>
+        `);
+        win.document.close();
+        // Espera as fontes carregarem antes de abrir o diálogo de impressão
+        win.onload = () => setTimeout(() => win.print(), 300);
     }
 };
 
