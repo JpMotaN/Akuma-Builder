@@ -194,13 +194,13 @@ const EFEITOS_AUMENTO = {
         {
             id: 'aumentar-area',
             nome: 'Aumentar Área',
-            desc: 'Aumenta a área de efeito da técnica',
+            desc: 'Aumenta a área de efeito da técnica (1 PP por 3m adicionais; Linha: 2 PP por 1,5m de largura)',
             tipo: 'select',
             opcoes: [
-                { valor: 3, nome: '+3m raio (Esfera/Cilindro)', custo: 1 },
-                { valor: 6, nome: '+6m raio (Esfera/Cilindro)', custo: 2 },
-                { valor: 9, nome: '+9m (Cone)', custo: 1 },
-                { valor: 1.5, nome: '+1.5m largura (Linha)', custo: 2 }
+                { valor: 3, nome: '+3m (Cone/Esfera/Cilindro)', custo: 1 },
+                { valor: 6, nome: '+6m (Cone/Esfera/Cilindro)', custo: 2 },
+                { valor: 9, nome: '+9m (Cone/Esfera/Cilindro)', custo: 3 },
+                { valor: 1.5, nome: '+1,5m largura (Linha)', custo: 2 }
             ],
             multiplo: true
         },
@@ -645,14 +645,33 @@ const MPS_ESPECIAIS = [
 ];
 
 // ===== MODIFICADORES DE PONTO VIRTUAL (para MPs criadas) =====
+// Tabela "Modificadores de Ponto Virtual" (pág. 208 do livro)
 const MODIFICADORES_PV = [
-    { id: 'passiva', nome: 'Passiva', ajuste: -2, desc: 'Sempre ativa' },
-    { id: 'inacao', nome: 'Inação', ajuste: -1, desc: 'Ativa junto com outra ação' },
-    { id: 'acao', nome: 'Ação', ajuste: 0, desc: 'Requer Ação' },
+    { id: 'passiva', nome: 'Passiva', ajuste: -3, desc: 'Sempre ativa, sem necessidade de ação' },
+    { id: 'inacao', nome: 'Inação', ajuste: -1, desc: 'Ativa em conjunto com uma ação, ação poderosa, ação bônus ou reação' },
     { id: 'acao-bonus', nome: 'Ação Bônus', ajuste: 2, desc: 'Requer Ação Bônus' },
     { id: 'reacao', nome: 'Reação', ajuste: 2, desc: 'Requer Reação' },
     { id: 'acao-poderosa', nome: 'Ação Poderosa', ajuste: 3, desc: 'Requer Ação Poderosa' }
 ];
+
+// Regras de criação de MP (pág. 208): pool base 6 PV; reduções e o requisito de
+// ativação somam/subtraem PV; o consumo em efeitos nunca pode passar de 12 PV.
+const MP_REGRAS = {
+    pvBase: 6,
+    pvTeto: 12,
+    // Efeitos proibidos em MPs pelo livro (Técnica Rápida/Demorada por regra explícita;
+    // Dano Adicional/Contínuo porque MP não pode causar nem aumentar dano)
+    efeitosProibidos: ['tecnica-rapida', 'tecnica-demorada', 'dano-adicional', 'dano-continuo'],
+    restricoes: [
+        'Não pode causar dano diretamente em criaturas',
+        'Não pode aumentar o dano de jogadas de ataque (comum ou Técnicas)',
+        'Não pode recuperar Pontos de Vida sem limitação de uso',
+        'Não pode recuperar Pontos de Poder de nenhuma forma',
+        'Só pode aumentar a CR de uma criatura com o requisito "Ação Poderosa"',
+        'Segue as regras gerais de Técnicas de 2º grau para alcance e cálculos de PP',
+        'Os efeitos "Técnica Rápida" e "Técnica Demorada" não podem ser usados'
+    ]
+};
 
 // ===== TRAÇOS ZOAN (DADOS EXATOS DO LIVRO) =====
 const TRACOS_ZOAN = {
@@ -843,7 +862,7 @@ const TRACOS_ZOAN = {
                 { 
                     id: 'poder-tracao', 
                     nome: 'Poder de Tração', 
-                    desc: 'Quando na forma animal, você recebe vantagem em Testes de Atributo e Resistência de Força. Além disso, dobra o valor base da sua capacidade de carga.' 
+                    desc: 'Quando na forma animal, você recebe vantagem em Testes de Atributo e Salvaguardas de Força. Além disso, dobra o valor base da sua capacidade de carga.'
                 },
                 { 
                     id: 'casco-protetor', 
@@ -1047,6 +1066,75 @@ const REGRAS_ZOAN = {
         ]
     }
 };
+
+// ===== CRIAÇÃO DE POINTS (tabela "Criação de Points", pág. 220) =====
+// Traços Realçados seguem as regras de MP (pontos virtuais). Ao mesclar traço + técnica
+// no mesmo Point, os pontos virtuais do traço são descontados do máximo de PP da técnica.
+const CRIACAO_POINTS = [
+    { point: 1, nivel: 1, nome: '1º Point', maxPPTraco: 0, maxPPTecnica: 2 },
+    { point: 2, nivel: 3, nome: '2º Point', maxPPTraco: 4, maxPPTecnica: 4 },
+    { point: 3, nivel: 6, nome: '3º Point', maxPPTraco: 6, maxPPTecnica: 6 },
+    { point: 4, nivel: 9, nome: '4º Point', maxPPTraco: 8, maxPPTecnica: 8 },
+    { point: 5, nivel: 12, nome: '5º Point', maxPPTraco: 10, maxPPTecnica: 10 }
+];
+
+// ===== ESTÁGIO DESPERTO (resumos para exibição na ficha) =====
+const ESTAGIO_DESPERTO = {
+    zoan: {
+        titulo: 'Estágio Desperto (Zoan Comum e Ancestral)',
+        requisito: 'A partir do 16º nível. Ao despertar, Salvaguarda de Presença ou Vontade CD 23 para manter a consciência (resultado 1 natural ou 3 falhas = besta irracional controlada pelo Narrador).',
+        caracteristicas: [
+            'Liberação Cansativa: consome 1 PP ao final de cada turno; a 0 PP o estágio encerra.',
+            'Explosão de Poder: pode recuperar 10 PP (1x/descanso longo).',
+            'Ímpeto Desperto: ao usar Técnica de Combate com Ação Poderosa que cause dano direto, pode fazer uma jogada de ataque (comum) contra o alvo como parte da ação (3 usos/descanso longo).',
+            'Força Bestial: ataque corpo a corpo desarmado se torna 3d6 Contundente.',
+            'Auge Físico: Força, Destreza e Constituição passam a valer 30; beneficia-se de características de forma animal e híbrida.',
+            'Recuperação Monstruosa: ao cair a 0 PV sem morrer, 1d20 ≥ 10 recupera metade dos PV totais (cada sucesso: +1 na CD e +1 PP na Liberação Cansativa).'
+        ]
+    },
+    mitica: {
+        titulo: 'Estágio Desperto (Zoan Mítica)',
+        requisito: 'Mesmos requisitos das Zoan Comuns e Ancestrais (16º nível; Salvaguarda de Presença ou Vontade CD 23 para manter a consciência).',
+        caracteristicas: [
+            'Liberação Cansativa: consome 1 PP ao final de cada turno; a 0 PP o estágio encerra.',
+            'Manifestação de Poder Extra: beneficia-se de uma 2ª MP criada pelo jogador durante o estágio.',
+            'Ímpeto Desperto: ao usar Técnica de Combate com Ação Poderosa que cause dano direto, pode fazer uma jogada de ataque (comum) contra o alvo como parte da ação (3 usos/descanso longo).',
+            'Auge Físico: Força, Destreza e Constituição passam a valer 30; beneficia-se de características de forma animal e híbrida.',
+            'Recuperação Monstruosa: ao cair a 0 PV sem morrer, 1d20 ≥ 10 recupera 1/3 dos PV totais (cada sucesso: +1 na CD e +1 PP na Liberação Cansativa).',
+            'Efeito Variável: escolhe um efeito do Despertar Aprimorador ou Transmutador (troca em descanso curto/longo).',
+            'Novo Patamar: Técnicas de 6º/7º grau (ou Points quaisquer) no 16º/20º nível + 1 Traço Específico ou Ancestral extra.'
+        ]
+    },
+    logiaParamecia: {
+        titulo: 'Estágio Desperto (Logia e Paramecia)',
+        requisito: 'A partir do 16º nível: Despertar da Mente e do Corpo (definido pelo Narrador) + Alinhamento Sobrenatural (atributo da Propriedade no valor mínimo da Categoria: S=20, A=19, B=18, C=17).',
+        caracteristicas: [
+            'Liberação Cansativa: consome 1 PP ao final de cada turno; a 0 PP o estágio encerra.',
+            'Novo Patamar: Técnicas de Combate de 6º grau (16º nível) e 7º grau (20º nível) + 2 Técnicas Auxiliares correspondentes.',
+            'Explosão de Poder: pode recuperar 10 PP (1x/descanso longo).',
+            'Ímpeto Desperto: ao usar Técnica de Combate com Ação Poderosa que cause dano direto, pode fazer uma jogada de ataque (comum) contra o alvo como parte da ação (3 usos/descanso longo).'
+        ]
+    }
+};
+
+// Tipos de despertar (Logia e Paramecia) — definido pelo Narrador para cada fruto
+const TIPOS_DESPERTAR = [
+    {
+        id: 'aprimorador',
+        nome: 'Despertar Aprimorador',
+        desc: 'Corpo Aprimorado: +10 PP máximos, +50 PV máximos e +1 CR durante o estágio. Transformação Sustentável: Técnicas de Combate do fruto (sem requisito "Estágio Desperto") reduzem o custo em metade do grau (arred. p/ baixo, custo mínimo 1 PP).'
+    },
+    {
+        id: 'transmutador',
+        nome: 'Despertar Transmutador',
+        desc: 'Técnicas Abrangentes: vantagem na jogada de ataque (Técnicas) OU desvantagem em uma Salvaguarda imposta. Área Afetada: transforma esfera de até 9m ao seu redor (móvel); ao usar qualquer Técnica pode aplicar Execução Espacial, Transformação Ofensiva (Salvaguarda ou 5d8), Defensiva (+3 CR) ou Variada (condição ≤3 PP). Usos = Bônus de Proficiência por descanso longo.'
+    },
+    {
+        id: 'holista',
+        nome: 'Despertar Holista',
+        desc: 'Controle Supremo: um atributo fixo passa a valer 30 durante o estágio. Efeito Variável: ao entrar no estágio, escolhe um efeito do Despertar Aprimorador ou Transmutador (pode trocar após descanso curto/longo).'
+    }
+];
 
 // ===== POINTS ZOAN PRÉ-DEFINIDOS (COM DADOS DO LIVRO) =====
 const POINTS_ZOAN = [
